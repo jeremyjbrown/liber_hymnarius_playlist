@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <title>Liber Hymnarius Player</title>
+
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.4;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: Canvas;
+      color: CanvasText;
+    }
+
+    main {
+      width: min(900px, 100%);
+      margin: 0 auto;
+      padding: 1rem;
+      padding-bottom: 11rem;
+    }
+
+    h1 {
+      margin-bottom: 0.25rem;
+      font-size: clamp(1.7rem, 5vw, 2.5rem);
+    }
+
+    .subtitle {
+      margin-top: 0;
+      opacity: 0.72;
+    }
+
+    #status {
+      padding: 0.75rem 0;
+      font-family: system-ui, sans-serif;
+      font-size: 0.95rem;
+      opacity: 0.8;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+
+    button {
+      min-height: 44px;
+      border: 1px solid currentColor;
+      border-radius: 0.5rem;
+      padding: 0.6rem 0.9rem;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:hover,
+    button:focus-visible {
+      background: color-mix(in srgb, CanvasText 10%, Canvas);
+    }
+
+    .playlist {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .track {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 3.5rem 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      text-align: left;
+      border-color: color-mix(in srgb, CanvasText 20%, Canvas);
+    }
+
+    .track-number {
+      font-family: system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.65;
+      text-align: right;
+    }
+
+    .track-title {
+      overflow-wrap: anywhere;
+    }
+
+    .track-size {
+      font-family: system-ui, sans-serif;
+      font-size: 0.8rem;
+      opacity: 0.6;
+      white-space: nowrap;
+    }
+
+    .track.active {
+      font-weight: 700;
+      border-width: 2px;
+    }
+
+    .player {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      border-top: 1px solid color-mix(in srgb, CanvasText 25%, Canvas);
+      background: Canvas;
+      padding:
+        0.75rem
+        max(0.75rem, env(safe-area-inset-right))
+        max(0.75rem, env(safe-area-inset-bottom))
+        max(0.75rem, env(safe-area-inset-left));
+      box-shadow: 0 -0.35rem 1rem rgb(0 0 0 / 0.08);
+    }
+
+    .player-inner {
+      width: min(900px, 100%);
+      margin: 0 auto;
+    }
+
+    .now-playing {
+      margin-bottom: 0.5rem;
+      min-height: 1.5em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: auto auto auto 1fr auto;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .controls button {
+      font-family: system-ui, sans-serif;
+      font-size: 1.2rem;
+      min-width: 48px;
+    }
+
+    #seek {
+      width: 100%;
+    }
+
+    .time {
+      min-width: 4.5rem;
+      text-align: right;
+      font-family: system-ui, sans-serif;
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .error {
+      color: #b00020;
+    }
+
+    @media (max-width: 600px) {
+      .track {
+        grid-template-columns: 2.6rem 1fr;
+      }
+
+      .track-size {
+        display: none;
+      }
+
+      .controls {
+        grid-template-columns: auto auto auto 1fr;
+      }
+
+      .time {
+        grid-column: 1 / -1;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Liber Hymnarius</h1>
+    <p class="subtitle">Audio recordings from LiberHymnarius.org</p>
+
+    <div id="status">Loading playlist…</div>
+
+    <div class="toolbar">
+      <button id="playAll" type="button">▶ Play All</button>
+      <button id="shuffle" type="button">Shuffle</button>
+    </div>
+
+    <div id="playlist" class="playlist" aria-label="Playlist"></div>
+  </main>
+
+  <div class="player">
+    <div class="player-inner">
+      <div id="nowPlaying" class="now-playing">Select a chant</div>
+
+      <div class="controls">
+        <button id="previous" type="button" aria-label="Previous">⏮</button>
+        <button id="playPause" type="button" aria-label="Play or pause">▶</button>
+        <button id="next" type="button" aria-label="Next">⏭</button>
+
+        <input
+          id="seek"
+          type="range"
+          min="0"
+          max="1000"
+          value="0"
+          aria-label="Playback position"
+        >
+
+        <div id="time" class="time">0:00 / 0:00</div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="audio" preload="metadata"></audio>
+
+  <script>
+    const MANIFEST_URL = "audio/manifest.csv";
+    const AUDIO_DIR = "audio/";
+
+    const audio = document.getElementById("audio");
+    const playlistEl = document.getElementById("playlist");
+    const statusEl = document.getElementById("status");
+    const nowPlayingEl = document.getElementById("nowPlaying");
+    const playPauseBtn = document.getElementById("playPause");
+    const previousBtn = document.getElementById("previous");
+    const nextBtn = document.getElementById("next");
+    const playAllBtn = document.getElementById("playAll");
+    const shuffleBtn = document.getElementById("shuffle");
+    const seekEl = document.getElementById("seek");
+    const timeEl = document.getElementById("time");
+
+    let tracks = [];
+    let currentIndex = -1;
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let field = "";
+      let quoted = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const next = text[i + 1];
+
+        if (char === '"') {
+          if (quoted && next === '"') {
+            field += '"';
+            i++;
+          } else {
+            quoted = !quoted;
+          }
+        } else if (char === "," && !quoted) {
+          row.push(field);
+          field = "";
+        } else if ((char === "\n" || char === "\r") && !quoted) {
+          if (char === "\r" && next === "\n") {
+            i++;
+          }
+
+          row.push(field);
+          field = "";
+
+          if (row.some(value => value.length > 0)) {
+            rows.push(row);
+          }
+
+          row = [];
+        } else {
+          field += char;
+        }
+      }
+
+      if (field.length || row.length) {
+        row.push(field);
+        rows.push(row);
+      }
+
+      if (!rows.length) {
+        return [];
+      }
+
+      const headers = rows[0];
+
+      return rows.slice(1).map(values => {
+        const record = {};
+        headers.forEach((header, index) => {
+          record[header] = values[index] ?? "";
+        });
+        return record;
+      });
+    }
+
+    function displayTitle(track) {
+      const filename = track.original_name || track.local_path || "Untitled";
+
+      return filename
+        .replace(/\.mp3$/i, "")
+        .replace(/_/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function fileUrl(track) {
+      return new URL(AUDIO_DIR + track.local_path, window.location.href).href;
+    }
+
+    function humanBytes(value) {
+      const bytes = Number(value);
+
+      if (!Number.isFinite(bytes) || bytes <= 0) {
+        return "";
+      }
+
+      if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(0)} KB`;
+      }
+
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function formatTime(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return "0:00";
+      }
+
+      const minutes = Math.floor(seconds / 60);
+      const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
+
+      return `${minutes}:${remainder}`;
+    }
+
+    function renderPlaylist() {
+      playlistEl.innerHTML = "";
+
+      tracks.forEach((track, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "track";
+        button.dataset.index = index;
+
+        const number = document.createElement("span");
+        number.className = "track-number";
+        number.textContent = String(index + 1);
+
+        const title = document.createElement("span");
+        title.className = "track-title";
+        title.textContent = displayTitle(track);
+
+        const size = document.createElement("span");
+        size.className = "track-size";
+        size.textContent = humanBytes(track.bytes);
+
+        button.append(number, title, size);
+
+        button.addEventListener("click", () => {
+          loadTrack(index, true);
+        });
+
+        playlistEl.appendChild(button);
+      });
+    }
+
+    function updateActiveTrack() {
+      document.querySelectorAll(".track").forEach((element, index) => {
+        element.classList.toggle("active", index === currentIndex);
+      });
+
+      const active = document.querySelector(".track.active");
+      if (active) {
+        active.scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    async function loadTrack(index, autoplay = false) {
+      if (!tracks.length) {
+        return;
+      }
+
+      if (index < 0) {
+        index = tracks.length - 1;
+      }
+
+      if (index >= tracks.length) {
+        index = 0;
+      }
+
+      currentIndex = index;
+      const track = tracks[currentIndex];
+      const title = displayTitle(track);
+
+      audio.src = fileUrl(track);
+      nowPlayingEl.textContent = `${currentIndex + 1}. ${title}`;
+      document.title = `${title} — Liber Hymnarius`;
+
+      updateActiveTrack();
+      updateMediaSession(track);
+
+      localStorage.setItem("liberHymnarius.currentIndex", String(currentIndex));
+
+      if (autoplay) {
+        try {
+          await audio.play();
+        } catch (error) {
+          console.error("Playback could not start:", error);
+        }
+      }
+    }
+
+    async function togglePlay() {
+      if (!tracks.length) {
+        return;
+      }
+
+      if (currentIndex === -1) {
+        await loadTrack(0, true);
+        return;
+      }
+
+      if (audio.paused) {
+        await audio.play();
+      } else {
+        audio.pause();
+      }
+    }
+
+    function nextTrack(autoplay = true) {
+      if (!tracks.length) {
+        return;
+      }
+
+      loadTrack(currentIndex + 1, autoplay);
+    }
+
+    function previousTrack() {
+      if (!tracks.length) {
+        return;
+      }
+
+      if (audio.currentTime > 3) {
+        audio.currentTime = 0;
+        return;
+      }
+
+      loadTrack(currentIndex - 1, !audio.paused);
+    }
+
+    function updateMediaSession(track) {
+      if (!("mediaSession" in navigator)) {
+        return;
+      }
+
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: displayTitle(track),
+        artist: "Liber Hymnarius",
+        album: "Liber Hymnarius"
+      });
+    }
+
+    async function loadManifest() {
+      try {
+        const response = await fetch(MANIFEST_URL, { cache: "no-cache" });
+
+        if (!response.ok) {
+          throw new Error(
+            `Could not load ${MANIFEST_URL} (${response.status})`
+          );
+        }
+
+        const text = await response.text();
+        tracks = parseCsv(text).filter(
+          track => track.local_path && track.local_path.toLowerCase().endsWith(".mp3")
+        );
+
+        if (!tracks.length) {
+          throw new Error("The manifest contains no MP3 files.");
+        }
+
+        statusEl.textContent = `${tracks.length} chants`;
+        renderPlaylist();
+
+        const savedIndex = Number(
+          localStorage.getItem("liberHymnarius.currentIndex")
+        );
+
+        if (
+          Number.isInteger(savedIndex) &&
+          savedIndex >= 0 &&
+          savedIndex < tracks.length
+        ) {
+          loadTrack(savedIndex, false);
+        }
+      } catch (error) {
+        console.error(error);
+        statusEl.classList.add("error");
+        statusEl.textContent =
+          `Could not load the playlist. Make sure ${MANIFEST_URL} exists.`;
+      }
+    }
+
+    playPauseBtn.addEventListener("click", togglePlay);
+    nextBtn.addEventListener("click", () => nextTrack(true));
+    previousBtn.addEventListener("click", previousTrack);
+
+    playAllBtn.addEventListener("click", () => {
+      loadTrack(0, true);
+    });
+
+    shuffleBtn.addEventListener("click", () => {
+      if (!tracks.length) {
+        return;
+      }
+
+      const randomIndex = Math.floor(Math.random() * tracks.length);
+      loadTrack(randomIndex, true);
+    });
+
+    seekEl.addEventListener("input", () => {
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+        return;
+      }
+
+      audio.currentTime =
+        (Number(seekEl.value) / Number(seekEl.max)) * audio.duration;
+    });
+
+    audio.addEventListener("play", () => {
+      playPauseBtn.textContent = "❚❚";
+
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "playing";
+      }
+    });
+
+    audio.addEventListener("pause", () => {
+      playPauseBtn.textContent = "▶";
+
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "paused";
+      }
+    });
+
+    audio.addEventListener("timeupdate", () => {
+      const duration = audio.duration || 0;
+      const current = audio.currentTime || 0;
+
+      if (duration > 0) {
+        seekEl.value = String(
+          Math.round((current / duration) * Number(seekEl.max))
+        );
+      }
+
+      timeEl.textContent =
+        `${formatTime(current)} / ${formatTime(duration)}`;
+
+      if (currentIndex >= 0) {
+        localStorage.setItem(
+          "liberHymnarius.position",
+          JSON.stringify({
+            index: currentIndex,
+            seconds: current
+          })
+        );
+      }
+    });
+
+    audio.addEventListener("loadedmetadata", () => {
+      try {
+        const saved = JSON.parse(
+          localStorage.getItem("liberHymnarius.position") || "null"
+        );
+
+        if (
+          saved &&
+          saved.index === currentIndex &&
+          Number.isFinite(saved.seconds) &&
+          saved.seconds > 0 &&
+          saved.seconds < audio.duration - 3
+        ) {
+          audio.currentTime = saved.seconds;
+        }
+      } catch {
+        // Ignore malformed saved state.
+      }
+    });
+
+    audio.addEventListener("ended", () => {
+      nextTrack(true);
+    });
+
+    audio.addEventListener("error", () => {
+      console.error("Audio error:", audio.error);
+    });
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.setActionHandler("play", () => audio.play());
+      navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+      navigator.mediaSession.setActionHandler("nexttrack", () => nextTrack(true));
+      navigator.mediaSession.setActionHandler("previoustrack", previousTrack);
+
+      try {
+        navigator.mediaSession.setActionHandler("seekto", details => {
+          if (details.seekTime != null) {
+            audio.currentTime = details.seekTime;
+          }
+        });
+      } catch {
+        // Some browsers do not support the seekto action.
+      }
+    }
+
+    loadManifest();
+  </script>
+</body>
+</html>
