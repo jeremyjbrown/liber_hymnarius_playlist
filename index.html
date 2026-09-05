@@ -244,6 +244,9 @@
 
     let tracks = [];
     let currentIndex = -1;
+    let shuffleEnabled = false;
+    let shuffleOrder = [];
+    let shufflePosition = -1;
 
     function parseCsv(text) {
       const rows = [];
@@ -436,8 +439,44 @@
       }
     }
 
+    function buildShuffleOrder(startIndex = currentIndex) {
+      const indices = tracks.map((_, index) => index);
+
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+
+      if (startIndex >= 0) {
+        const existing = indices.indexOf(startIndex);
+        if (existing !== -1) {
+          indices.splice(existing, 1);
+          indices.unshift(startIndex);
+        }
+      }
+
+      shuffleOrder = indices;
+      shufflePosition = startIndex >= 0 ? 0 : -1;
+    }
+
     function nextTrack(autoplay = true) {
       if (!tracks.length) {
+        return;
+      }
+
+      if (shuffleEnabled) {
+        if (!shuffleOrder.length) {
+          buildShuffleOrder(currentIndex);
+        }
+
+        shufflePosition += 1;
+
+        if (shufflePosition >= shuffleOrder.length) {
+          buildShuffleOrder(currentIndex);
+          shufflePosition = 1;
+        }
+
+        loadTrack(shuffleOrder[shufflePosition], autoplay);
         return;
       }
 
@@ -451,6 +490,12 @@
 
       if (audio.currentTime > 3) {
         audio.currentTime = 0;
+        return;
+      }
+
+      if (shuffleEnabled && shuffleOrder.length) {
+        shufflePosition = Math.max(0, shufflePosition - 1);
+        loadTrack(shuffleOrder[shufflePosition], !audio.paused);
         return;
       }
 
@@ -491,6 +536,11 @@
         statusEl.textContent = `${tracks.length} chants`;
         renderPlaylist();
 
+        shuffleEnabled =
+          localStorage.getItem("liberHymnarius.shuffleEnabled") === "true";
+        shuffleBtn.textContent = shuffleEnabled ? "Shuffle: On" : "Shuffle";
+        shuffleBtn.setAttribute("aria-pressed", String(shuffleEnabled));
+
         const savedIndex = Number(
           localStorage.getItem("liberHymnarius.currentIndex")
         );
@@ -501,6 +551,12 @@
           savedIndex < tracks.length
         ) {
           loadTrack(savedIndex, false);
+
+          if (shuffleEnabled) {
+            buildShuffleOrder(savedIndex);
+          }
+        } else if (shuffleEnabled) {
+          buildShuffleOrder(-1);
         }
       } catch (error) {
         console.error(error);
@@ -523,8 +579,21 @@
         return;
       }
 
-      const randomIndex = Math.floor(Math.random() * tracks.length);
-      loadTrack(randomIndex, true);
+      shuffleEnabled = !shuffleEnabled;
+      shuffleBtn.textContent = shuffleEnabled ? "Shuffle: On" : "Shuffle";
+      shuffleBtn.setAttribute("aria-pressed", String(shuffleEnabled));
+
+      localStorage.setItem(
+        "liberHymnarius.shuffleEnabled",
+        String(shuffleEnabled)
+      );
+
+      if (shuffleEnabled) {
+        buildShuffleOrder(currentIndex);
+      } else {
+        shuffleOrder = [];
+        shufflePosition = -1;
+      }
     });
 
     seekEl.addEventListener("input", () => {
